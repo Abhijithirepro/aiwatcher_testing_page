@@ -310,7 +310,8 @@
 
         let ws = null;
         let batchInterval = null;
-        let pingTimeout = null;
+        let pingInterval = null;
+        let isMonitoringStarted = false;
         const WS_URL = 'ws://127.0.0.1:8707';
 
         // --- Launch App Logic (from lauch.js) ---
@@ -447,22 +448,17 @@
                 <div class="log-content">${content}</div>
             `;
 
-            logsContainer.appendChild(entry);
-
-            // Auto-scroll only if already near bottom
-            const isNearBottom = logsContainer.scrollHeight - logsContainer.scrollTop - logsContainer.clientHeight < 100;
-            if (isNearBottom) {
-                logsContainer.scrollTop = logsContainer.scrollHeight;
-            }
+            // Prepend new logs to the top
+            logsContainer.prepend(entry);
+            logsContainer.scrollTop = 0;
         }
 
         function showReconnect() {
-            addLog('Connection lost or Pong timed out. Requires Reconnect.', 'sys');
+            addLog('Connection lost. Please manually Reconnect or Launch App.', 'sys');
             statusDot.className = 'status-dot error';
             statusText.textContent = 'Connection Lost';
             startBtn.disabled = false;
             startBtn.innerHTML = '<span>Reconnect</span>';
-            // Cleanup WebSocket but keep logs
             cleanup(false);
         }
 
@@ -476,31 +472,23 @@
             startBtn.disabled = true;
             startBtn.innerHTML = '<span>Connecting...</span>';
 
-            // Clear any existing timeouts
-            if (pingTimeout) clearTimeout(pingTimeout);
+            isMonitoringStarted = false;
 
             try {
                 ws = new WebSocket(WS_URL);
 
                 ws.onopen = () => {
-                    statusDot.className = 'status-dot connected';
-                    statusText.textContent = 'Connected';
-                    startBtn.innerHTML = '<span>Running...</span>';
-                    addLog('Connection established', 'sys');
+                    statusDot.className = 'status-dot';
+                    statusText.textContent = 'Waiting for Pong...';
+                    statusDot.style.backgroundColor = 'var(--warning-color)';
+                    startBtn.innerHTML = '<span>Verifying...</span>';
+                    addLog('Socket open. Starting Ping to verify...', 'sys');
 
-                    // 1. Send Ping
-                    setTimeout(() => {
-                        sendAction('ping');
+                    // Start Ping Loop: send 'ping' until connected
+                    sendPing();
 
-                        // Set 5s timeout for Pong
-                        pingTimeout = setTimeout(() => {
-                            if (ws) {
-                                addLog('Error: Pong timed out! (No response in 5s)', 'sys');
-                                ws.close(); // Force close
-                                showReconnect();
-                            }
-                        }, 5000);
-                    }, 500);
+                    if (pingInterval) clearInterval(pingInterval);
+                    pingInterval = setInterval(sendPing, 5000);
                 };
 
                 ws.onmessage = (event) => {
@@ -510,32 +498,43 @@
                         const data = JSON.parse(event.data);
 
                         if (data.type === 'pong') {
-                            // Pong received! Clear timeout
-                            if (pingTimeout) {
-                                clearTimeout(pingTimeout);
-                                pingTimeout = null;
-                                addLog('Pong received, connection verified.', 'sys');
+                            // Pong received! Connection is verified.
+                            // STOP Sending Pings now.
+                            if (pingInterval) {
+                                clearInterval(pingInterval);
+                                pingInterval = null;
+                                addLog('Pong received. Connection verified. Stopping Ping Loop.', 'sys');
                             }
 
-                            // 2. Start Monitoring
-                            setTimeout(() => {
-                                sendAction('start_monitoring');
-                            }, 500);
+                            statusDot.className = 'status-dot connected';
+                            statusText.textContent = 'Connected';
+                            statusDot.style.backgroundColor = '';
+                            startBtn.innerHTML = '<span>Running...</span>';
 
-                            // 3. Call get_monitored_batch every 10 seconds
-                            setTimeout(() => {
-                                sendAction('get_monitored_batch');
+                            if (!isMonitoringStarted) {
+                                addLog('Connection initialized. Starting Monitoring Flow.', 'sys');
+                                isMonitoringStarted = true;
 
-                                if (batchInterval) clearInterval(batchInterval);
+                                // 2. Start Monitoring
+                                setTimeout(() => {
+                                    sendAction('start_monitoring');
+                                }, 500);
 
-                                batchInterval = setInterval(() => {
-                                    if (ws && ws.readyState === WebSocket.OPEN) {
-                                        sendAction('get_monitored_batch');
-                                    } else {
-                                        cleanup();
-                                    }
-                                }, 10000);
-                            }, 1500);
+                                // 3. Call get_monitored_batch every 10 seconds
+                                setTimeout(() => {
+                                    sendAction('get_monitored_batch');
+
+                                    if (batchInterval) clearInterval(batchInterval);
+
+                                    batchInterval = setInterval(() => {
+                                        if (ws && ws.readyState === WebSocket.OPEN) {
+                                            sendAction('get_monitored_batch');
+                                        } else {
+                                            cleanup();
+                                        }
+                                    }, 10000);
+                                }, 1500);
+                            }
                         }
                     } catch (e) {
                         // ignore
@@ -547,7 +546,6 @@
                     statusDot.className = 'status-dot error';
                     statusText.textContent = 'Error';
                     addLog('WebSocket error occurred', 'sys');
-                    showReconnect();
                 };
 
                 ws.onclose = () => {
@@ -567,20 +565,27 @@
             }
         }
 
+        function sendPing() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                sendAction('ping');
+            }
+        }
+
         function cleanup(fully = true) {
             if (batchInterval) {
                 clearInterval(batchInterval);
                 batchInterval = null;
             }
-            if (pingTimeout) {
-                clearTimeout(pingTimeout);
-                pingTimeout = null;
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
             }
             if (fully) {
                 startBtn.disabled = false;
                 startBtn.innerHTML = '<span>Connect & Start</span>';
             }
             ws = null;
+            isMonitoringStarted = false;
         }
 
         function sendAction(actionName) {
