@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Monitor</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --header-bg: #1e293b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-color: #3b82f6;
+            --accent-hover: #2563eb;
+            --success-color: #22c55e;
+            --error-color: #ef4444;
+            --warning-color: #fbbf24;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            --mono-font: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        header {
+            background-color: var(--header-bg);
+            padding: 0.75rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-color);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 0;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background-color: rgba(255, 255, 255, 0.05);
+            padding: 0.25rem 0.75rem;
+            border-radius: 99px;
+            border: 1px solid var(--border-color);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--text-secondary);
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.connected {
+            background-color: var(--success-color);
+            box-shadow: 0 0 8px var(--success-color);
+        }
+
+        .status-dot.error {
+            background-color: var(--error-color);
+            box-shadow: 0 0 8px var(--error-color);
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        button {
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        #startBtn {
+            background-color: var(--accent-color);
+        }
+
+        #startBtn:hover {
+            background-color: var(--accent-hover);
+        }
+
+        #startBtn:disabled {
+            background-color: var(--text-secondary);
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        #launchBtn {
+            background-color: #8b5cf6;
+        }
+
+        #launchBtn:hover {
+            background-color: #7c3aed;
+        }
+
+        #clearBtn {
+            background-color: rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+        }
+
+        #clearBtn:hover {
+            background-color: rgba(255, 255, 255, 0.15);
+            color: var(--text-primary);
+        }
+
+        /* Main Content / Logs */
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .logs-window {
+            flex: 1;
+            background-color: rgba(0, 0, 0, 0.2);
+            padding: 1rem;
+            overflow-y: auto;
+            font-family: var(--mono-font);
+            font-size: 0.9rem;
+            scroll-behavior: smooth;
+        }
+
+        .log-entry {
+            margin-bottom: 2px;
+            word-break: break-all;
+            padding: 4px 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            line-height: 1.5;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(2px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .log-entry:hover {
+            background-color: rgba(255, 255, 255, 0.03);
+        }
+
+        .log-time {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            min-width: 85px;
+            font-variant-numeric: tabular-nums;
+            margin-top: 2px;
+            user-select: none;
+        }
+
+        .log-content {
+            flex: 1;
+            white-space: pre-wrap;
+        }
+
+        .log-direction {
+            font-weight: bold;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .type-out .log-direction {
+            color: #60a5fa;
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+
+        .type-in .log-direction {
+            color: #22c55e;
+            background-color: rgba(34, 197, 94, 0.1);
+        }
+
+        .type-sys .log-direction {
+            color: #fbbf24;
+            background-color: rgba(251, 191, 36, 0.1);
+        }
+
+        .type-out .log-content {
+            color: #e2e8f0;
+        }
+
+        .type-in .log-content {
+            color: #a7f3d0;
+        }
+
+        .type-sys .log-content {
+            color: #fde68a;
+            font-style: italic;
+        }
+
+        /* Scrollbar */
+        .logs-window::-webkit-scrollbar {
+            width: 12px;
+        }
+
+        .logs-window::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .logs-window::-webkit-scrollbar-thumb {
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            border: 3px solid transparent;
+            background-clip: content-box;
+        }
+
+        .logs-window::-webkit-scrollbar-thumb:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="header-left">
+            <h1>WebSocket Monitor</h1>
+            <div class="status-badge">
+                <div id="statusDot" class="status-dot"></div>
+                <span id="statusText">Disconnected</span>
+            </div>
+        </div>
+        <div class="controls">
+            <button id="launchBtn" title="Launch HirePro AI Watcher">
+                <span>Launch App</span>
+            </button>
+            <button id="startBtn">
+                <span>Connect & Start</span>
+            </button>
+            <button id="clearBtn" title="Clear Logs">
+                <span>Clear</span>
+            </button>
+        </div>
+    </header>
+
+    <main>
+        <div class="logs-window" id="logs">
+            <!-- Logs will appear here -->
+        </div>
+    </main>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const launchBtn = document.getElementById('launchBtn');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const logsContainer = document.getElementById('logs');
+
+        let ws = null;
+        let batchInterval = null;
+        let pingTimeout = null;
+        const WS_URL = 'ws://127.0.0.1:8707';
+
+        // --- Launch App Logic (from lauch.js) ---
+        let prevLaunchClick = null;
+
+        function launchApp() {
+            return new Promise(function (resolve) {
+                // Construct the protocol URI
+                var uri = "haiw:" + btoa("//launchhireproaiwatcher"),
+                    currentClick = new Date(),
+                    diff;
+
+                if (prevLaunchClick) {
+                    diff = currentClick - prevLaunchClick;
+                    console.log(diff);
+                    if (diff > 5000) {
+                        checkhaiwexists(uri);
+                        resolve(true);
+                        prevLaunchClick = new Date();
+                    } else {
+                        alert('Please wait 5 seconds before clicking this button again');
+                        resolve(false);
+                    }
+                } else {
+                    checkhaiwexists(uri);
+                    resolve(true);
+                    prevLaunchClick = new Date();
+                }
+            });
+        }
+
+        function checkhaiwexists(haiwLink) {
+            launchUri(haiwLink,
+                function () { addLog('App launch initiated via protocol handler.', 'sys'); },
+                function () {
+                    alert("To attend this test, you need to install the HirePro AI Watcher app. Please download and install HirePro AI Watcher, and then take the test.");
+                    addLog('App not found or failed to launch.', 'sys');
+                }
+            );
+        }
+
+        function launchUri(uri, successCallback, noHandlerCallback) {
+            var parent = document.body;  // Set parent upfront
+            var iframe, timeout, blurHandler, timeoutHandler;
+
+            function callback(cb) {
+                if (typeof cb === 'function') cb();
+            }
+
+            function createHiddenIframe() {
+                iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                parent.appendChild(iframe);
+                return iframe;
+            }
+
+            function removeHiddenIframe() {
+                if (iframe && iframe.parentNode) {
+                    iframe.parentNode.removeChild(iframe);
+                }
+                iframe = null;
+            }
+
+            // Blur handlers
+            blurHandler = function () {
+                window.clearTimeout(timeout);
+                window.removeEventListener('blur', blurHandler);
+                removeHiddenIframe();  // Always cleanup first
+                callback(successCallback);
+            };
+
+            timeoutHandler = function () {
+                window.removeEventListener('blur', blurHandler);
+                removeHiddenIframe();  // Always cleanup first
+                callback(noHandlerCallback);
+            };
+
+            // Setup listeners and launch
+            window.addEventListener('blur', blurHandler);
+            timeout = window.setTimeout(timeoutHandler, 3000);
+
+            // Try regular location first
+            window.location.href = uri;
+
+            // Iframe detection (non-blocking)
+            createHiddenIframe();
+            try {
+                iframe.contentWindow.location.href = uri;
+            } catch (e) { }
+        }
+
+        launchBtn.addEventListener('click', () => {
+            addLog('Launching external application...', 'sys');
+            launchApp().then((launched) => {
+                if (launched) {
+                    addLog('Launch signal sent. Waiting 3s for app to start, then connecting...', 'sys');
+                    // Wait for the app to potentially start up before connecting
+                    setTimeout(connect, 3000);
+                } else {
+                    addLog('Launch command throttled. Please wait before clicking again.', 'sys');
+                }
+            });
+        });
+
+        // --- WebSocket Logic ---
+
+        function formatJSON(jsonString) {
+            try {
+                const obj = JSON.parse(jsonString);
+                return JSON.stringify(obj, null, 2);
+            } catch (e) {
+                return jsonString;
+            }
+        }
+
+        function addLog(message, type = 'sys') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry type-${type}`;
+
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+
+            let directionIcon = '•';
+            if (type === 'out') directionIcon = '↑';
+            if (type === 'in') directionIcon = '↓';
+
+            let content = message;
+            if (typeof message === 'string' && (message.trim().startsWith('{') || message.trim().startsWith('['))) {
+                content = formatJSON(message);
+            }
+
+            entry.innerHTML = `
+                <div class="log-time">${time}</div>
+                <div class="log-direction">${directionIcon}</div>
+                <div class="log-content">${content}</div>
+            `;
+
+            logsContainer.appendChild(entry);
+
+            // Auto-scroll only if already near bottom
+            const isNearBottom = logsContainer.scrollHeight - logsContainer.scrollTop - logsContainer.clientHeight < 100;
+            if (isNearBottom) {
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+        }
+
+        function showReconnect() {
+            addLog('Connection lost or Pong timed out. Requires Reconnect.', 'sys');
+            statusDot.className = 'status-dot error';
+            statusText.textContent = 'Connection Lost';
+            startBtn.disabled = false;
+            startBtn.innerHTML = '<span>Reconnect</span>';
+            // Cleanup WebSocket but keep logs
+            cleanup(false);
+        }
+
+        function connect() {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                addLog('Already connected or connecting...', 'sys');
+                return;
+            }
+
+            addLog(`Connecting to ${WS_URL}...`, 'sys');
+            startBtn.disabled = true;
+            startBtn.innerHTML = '<span>Connecting...</span>';
+
+            // Clear any existing timeouts
+            if (pingTimeout) clearTimeout(pingTimeout);
+
+            try {
+                ws = new WebSocket(WS_URL);
+
+                ws.onopen = () => {
+                    statusDot.className = 'status-dot connected';
+                    statusText.textContent = 'Connected';
+                    startBtn.innerHTML = '<span>Running...</span>';
+                    addLog('Connection established', 'sys');
+
+                    // 1. Send Ping
+                    setTimeout(() => {
+                        sendAction('ping');
+
+                        // Set 5s timeout for Pong
+                        pingTimeout = setTimeout(() => {
+                            if (ws) {
+                                addLog('Error: Pong timed out! (No response in 5s)', 'sys');
+                                ws.close(); // Force close
+                                showReconnect();
+                            }
+                        }, 5000);
+                    }, 500);
+                };
+
+                ws.onmessage = (event) => {
+                    addLog(event.data, 'in');
+
+                    try {
+                        const data = JSON.parse(event.data);
+
+                        if (data.type === 'pong') {
+                            // Pong received! Clear timeout
+                            if (pingTimeout) {
+                                clearTimeout(pingTimeout);
+                                pingTimeout = null;
+                                addLog('Pong received, connection verified.', 'sys');
+                            }
+
+                            // 2. Start Monitoring
+                            setTimeout(() => {
+                                sendAction('start_monitoring');
+                            }, 500);
+
+                            // 3. Call get_monitored_batch every 10 seconds
+                            setTimeout(() => {
+                                sendAction('get_monitored_batch');
+
+                                if (batchInterval) clearInterval(batchInterval);
+
+                                batchInterval = setInterval(() => {
+                                    if (ws && ws.readyState === WebSocket.OPEN) {
+                                        sendAction('get_monitored_batch');
+                                    } else {
+                                        cleanup();
+                                    }
+                                }, 10000);
+                            }, 1500);
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket Error:', error);
+                    statusDot.className = 'status-dot error';
+                    statusText.textContent = 'Error';
+                    addLog('WebSocket error occurred', 'sys');
+                    showReconnect();
+                };
+
+                ws.onclose = () => {
+                    if (statusText.textContent !== 'Connection Lost') {
+                        statusDot.className = 'status-dot';
+                        statusText.textContent = 'Disconnected';
+                        addLog('Connection closed', 'sys');
+                        startBtn.innerHTML = '<span>Reconnect</span>';
+                        startBtn.disabled = false;
+                    }
+                    cleanup(false);
+                };
+
+            } catch (e) {
+                addLog(`Error creating WebSocket: ${e.message}`, 'sys');
+                showReconnect();
+            }
+        }
+
+        function cleanup(fully = true) {
+            if (batchInterval) {
+                clearInterval(batchInterval);
+                batchInterval = null;
+            }
+            if (pingTimeout) {
+                clearTimeout(pingTimeout);
+                pingTimeout = null;
+            }
+            if (fully) {
+                startBtn.disabled = false;
+                startBtn.innerHTML = '<span>Connect & Start</span>';
+            }
+            ws = null;
+        }
+
+        function sendAction(actionName) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addLog(`Cannot send '${actionName}': WebSocket not open`, 'sys');
+                return;
+            }
+
+            const payload = JSON.stringify({ action: actionName });
+            ws.send(payload);
+            addLog(payload, 'out');
+        }
+
+        startBtn.addEventListener('click', connect);
+
+        clearBtn.addEventListener('click', () => {
+            logsContainer.innerHTML = '';
+            addLog('Logs cleared', 'sys');
+        });
+
+        // Initial log
+        addLog('Ready. Click "Launch App" to start the external tool, then "Connect" once it is running.', 'sys');
+    </script>
+</body>
+
+</html>
